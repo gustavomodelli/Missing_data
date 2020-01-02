@@ -1,0 +1,102 @@
+library(tidyverse)
+library(mice)
+library(broom)
+library(sjPlot)
+
+## --- Examples wiht multiple imputations ---- ##
+
+# Simulate a students data
+
+set.seed(123)
+student <- data.frame(
+  age = rnorm(1000, mean = 30, sd = 5),
+  sex = rbinom(1000, 1, prob = 0.5),
+  course = rbinom(1000, 1, prob = 0.7),
+  experience = rnorm(1000, mean = 5, sd = 1.5)
+)
+
+set.seed(123)
+student <- student %>% 
+  mutate(
+    age = ifelse(age < 18, 18, age),
+    sex = factor(sex, labels = c('female','male')),
+    course = factor(course, labels = c('phD','doctor')),
+    grade = ( ifelse(course == 'phD', rnorm(1000, 0.6, 0.25), rnorm(1000, 0.5, 0.25)) * experience ),
+    grade = ifelse(grade > 10, 10, grade)
+  )
+
+## ------ Plots to visualize ------ ##
+
+ggplot(student, aes(sex, grade, fill = sex))+
+  geom_boxplot()
+
+ggplot(student, aes(course, grade, fill = course))+
+  geom_boxplot()
+
+ggplot(student, aes(age, grade))+
+  geom_point()
+
+ggplot(student, aes(experience, grade, color = course))+
+  geom_point()
+
+## ------ Generate a linear model in a full data set ----- ##
+
+model_full <- lm(grade ~ . , data = student)
+summary(model_full)
+sjt.lm(model_full)
+
+## ----- Now ampute 50% of the data with missing values --- ##
+
+miss <- ampute(student, prop = 0.5)
+
+student.miss <- miss$amp
+summary(student.miss)
+
+md.pattern(student.miss)
+
+student.miss <- student.miss %>% 
+  mutate(
+    sex = factor(sex, label = c('female','male')),
+    course = factor(course, label = c('phD','Doctor'))
+  )
+
+
+model_miss <- lm(grade ~ . , data = student.miss)
+summary(model_miss)
+sjt.lm(model_miss)
+
+## ----- Impute missing values with mean -------------- ##
+imp.mean <- mice(student.miss, method = c('mean','logreg','logreg','mean','mean'), m = 1, maxit = 1)
+
+imp.mean.extract <- complete(imp.mean)
+
+model_mean <- lm(grade ~ age + sex + course + experience , data = imp.mean.extract)
+summary(model_mean)
+
+## ------- Impute missing values -------------------------##
+
+imp <- mice(student.miss, method = c('pmm','logreg','logreg','pmm','pmm'))
+
+## --- this Function impute 5 folds in same dataset
+
+student.imp <- complete(imp, action = 'long')
+
+## Model in the first data set imputed ---- ##
+
+student1 <- student.imp %>% filter(.imp == '1')
+
+model_1 <- lm(grade ~ age + sex + course + experience , data = student1)
+summary(model_1)
+
+## Better way to compute the coefficients ----- ##
+
+multiple <- with(imp, exp = lm(grade ~ age + sex + course + experience))
+
+summary(pool(multiple))
+Poll <- pool(multiple)
+
+
+### ---- Another way -------------------------- ##
+
+fit <- lm.mids(grade ~ age + sex + course + experience, data = imp)
+pool.r.squared(fit)
